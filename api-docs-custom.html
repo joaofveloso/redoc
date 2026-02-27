@@ -1866,7 +1866,30 @@
         }
 
         attachInterceptors() {
-            // Implementation in next tasks
+            if (!this.docsPanel) return;
+
+            // Use event delegation to intercept clicks on Redoc endpoints
+            this.docsPanel.addEventListener('click', (e) => {
+                // Find closest element with data-section-id (Redoc endpoint markers)
+                const endpointElement = e.target.closest('[data-section-id]');
+
+                if (!endpointElement) return;
+
+                // Extract endpoint info
+                const endpointInfo = this.extractEndpointInfo(endpointElement);
+                if (!endpointInfo) return;
+
+                // Check if this is an Operation endpoint (not parameter, schema, etc.)
+                if (!endpointInfo.sectionId.includes('Operation/')) return;
+
+                // Emit event to populate request builder
+                this.eventBus.emit('redoc:endpoint:clicked', endpointInfo);
+
+                // Highlight the selected endpoint
+                this.highlightEndpoint(endpointInfo.method, endpointInfo.path);
+            });
+
+            console.log('Redoc DOM interceptors attached');
         }
 
         injectTryButtons() {
@@ -1938,7 +1961,10 @@
         }
 
         subscribeToEvents() {
-            // Implementation in later task
+            // When endpoint is clicked, populate request builder
+            this.eventBus.on('redoc:endpoint:clicked', (endpointInfo) => {
+                this.populateRequestBuilder(endpointInfo);
+            });
         }
 
         extractEndpointInfo(element) {
@@ -2111,6 +2137,46 @@
                 return '';
             }
             return JSON.stringify(example, null, 2);
+        }
+
+        populateRequestBuilder(endpointInfo) {
+            const { method, path, parameters, requestBody } = endpointInfo;
+
+            // Set method and URL
+            this.stateManager.set('request.method', method);
+            this.stateManager.set('request.url', path);
+
+            // Update UI dropdowns
+            const methodSelect = document.getElementById('request-method');
+            methodSelect.value = method;
+            methodSelect.dispatchEvent(new Event('change'));
+
+            const urlInput = document.getElementById('request-url');
+            urlInput.value = path;
+
+            // Populate query parameters from spec
+            const queryParams = parameters
+                ? parameters
+                    .filter(p => p.in === 'query')
+                    .map(p => ({ key: p.name, value: p.example || '' }))
+                : [{ key: '', value: '' }];
+
+            this.stateManager.set('request.query', queryParams);
+            this.eventBus.emit('ui:render:query-params');
+
+            // Generate example request body if applicable
+            if (['POST', 'PUT', 'PATCH'].includes(method) && requestBody) {
+                const exampleBody = this.generateExampleBody(requestBody);
+                if (exampleBody) {
+                    this.stateManager.set('request.body', exampleBody);
+                    document.getElementById('request-body').value = exampleBody;
+                }
+            }
+
+            // Show notification
+            this.eventBus.emit('ui:notification', {
+                message: `Loaded ${method} ${path} from docs`
+            });
         }
 
         highlightEndpoint(method, path) {
