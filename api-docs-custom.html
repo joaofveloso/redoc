@@ -1835,7 +1835,7 @@
 
         async fetchOpenAPISpec() {
             try {
-                const response = await fetch('/q/openapi');
+                const response = await fetch('http://localhost:8080/q/openapi');
                 if (!response.ok) {
                     throw new Error(`Failed to fetch OpenAPI spec: ${response.status}`);
                 }
@@ -2145,7 +2145,7 @@
 
         initRedoc() {
             Redoc.init(
-                "/q/openapi",
+                "http://localhost:8080/q/openapi",
                 {
                     scrollYOffset: 0
                 },
