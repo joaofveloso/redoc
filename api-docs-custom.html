@@ -17,6 +17,7 @@
             --border-color: #ddd;
             --accent-primary: #3f51b5;
             --accent-hover: #303f9f;
+            --accent-bg: rgba(63, 81, 181, 0.1);
             --success: #4caf50;
             --warning: #ff9800;
             --error: #f44336;
@@ -36,6 +37,7 @@
             --border-color: #444;
             --accent-primary: #5c6bc0;
             --accent-hover: #7986cb;
+            --accent-bg: rgba(92, 107, 192, 0.15);
             --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
 
@@ -571,6 +573,21 @@
 
         .try-in-panel-btn:active {
             transform: scale(0.98);
+        }
+
+        /* Endpoint Highlighting */
+        .endpoint-active {
+            background: var(--accent-bg) !important;
+            border-left: 3px solid var(--accent-primary) !important;
+        }
+
+        .endpoint-highlight-fade {
+            animation: highlightFade 2s ease-out;
+        }
+
+        @keyframes highlightFade {
+            0% { background: var(--accent-bg); }
+            100% { background: transparent; }
         }
 
         /* Utility classes */
@@ -2093,6 +2110,30 @@
                 return '';
             }
             return JSON.stringify(example, null, 2);
+        }
+
+        highlightEndpoint(method, path) {
+            // Remove previous highlights
+            document.querySelectorAll('.endpoint-active').forEach(el => {
+                el.classList.remove('endpoint-active');
+            });
+
+            // Find the endpoint element by data-section-id
+            const sectionId = `section/Operation/${method.toLowerCase()}-${path}`;
+            const endpointEl = this.docsPanel.querySelector(`[data-section-id="${sectionId}"]`);
+
+            if (endpointEl) {
+                // Add highlight class
+                endpointEl.classList.add('endpoint-active');
+
+                // Scroll into view if not visible
+                endpointEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+                // Remove highlight after 2 seconds (optional)
+                setTimeout(() => {
+                    endpointEl.classList.remove('endpoint-active');
+                }, 2000);
+            }
         }
 
         destroy() {
