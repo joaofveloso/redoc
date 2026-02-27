@@ -1823,6 +1823,7 @@
             this.tryButtonsInjected = false;
             this.observer = null;
             this.highlightTimeout = null;
+            this._clickHandler = null;
         }
 
         async init() {
@@ -1868,8 +1869,8 @@
         attachInterceptors() {
             if (!this.docsPanel) return;
 
-            // Use event delegation to intercept clicks on Redoc endpoints
-            this.docsPanel.addEventListener('click', (e) => {
+            // Store handler as instance property for cleanup in destroy()
+            this._clickHandler = (e) => {
                 // Find closest element with data-section-id (Redoc endpoint markers)
                 const endpointElement = e.target.closest('[data-section-id]');
 
@@ -1887,7 +1888,10 @@
 
                 // Highlight the selected endpoint
                 this.highlightEndpoint(endpointInfo.method, endpointInfo.path);
-            });
+            };
+
+            // Use event delegation to intercept clicks on Redoc endpoints
+            this.docsPanel.addEventListener('click', this._clickHandler);
 
             console.log('Redoc DOM interceptors attached');
         }
@@ -2146,13 +2150,17 @@
             this.stateManager.set('request.method', method);
             this.stateManager.set('request.url', path);
 
-            // Update UI dropdowns
+            // Update UI dropdowns with null checks
             const methodSelect = document.getElementById('request-method');
-            methodSelect.value = method;
-            methodSelect.dispatchEvent(new Event('change'));
+            if (methodSelect) {
+                methodSelect.value = method;
+                methodSelect.dispatchEvent(new Event('change'));
+            }
 
             const urlInput = document.getElementById('request-url');
-            urlInput.value = path;
+            if (urlInput) {
+                urlInput.value = path;
+            }
 
             // Populate query parameters from spec
             const queryParams = parameters
@@ -2169,7 +2177,10 @@
                 const exampleBody = this.generateExampleBody(requestBody);
                 if (exampleBody) {
                     this.stateManager.set('request.body', exampleBody);
-                    document.getElementById('request-body').value = exampleBody;
+                    const bodyInput = document.getElementById('request-body');
+                    if (bodyInput) {
+                        bodyInput.value = exampleBody;
+                    }
                 }
             }
 
@@ -2214,6 +2225,13 @@
             if (this.highlightTimeout) {
                 clearTimeout(this.highlightTimeout);
                 this.highlightTimeout = null;
+            }
+
+            // Remove event listener to prevent memory leaks
+            if (this._clickHandler && this.docsPanel) {
+                this.docsPanel.removeEventListener('click', this._clickHandler);
+                this._clickHandler = null;
+                console.log('Redoc DOM interceptor removed');
             }
 
             // Disconnect MutationObserver to prevent memory leaks
