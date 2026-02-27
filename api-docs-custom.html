@@ -1890,24 +1890,59 @@
             };
         }
 
-        generateJSONFromSchema(schema) {
-            if (!schema) return '';
+        generateJSONFromSchema(schema, visited = new Set(), depth = 0) {
+            const MAX_DEPTH = 20;
 
-            // Handle $ref
+            // Guard against null/undefined
+            if (!schema) return null;
+
+            // Prevent infinite recursion from circular references
+            const schemaId = schema.$ref || JSON.stringify(schema);
+            if (visited.has(schemaId)) {
+                console.warn('Circular reference detected in schema, stopping recursion');
+                return null;
+            }
+
+            // Prevent excessive recursion depth
+            if (depth > MAX_DEPTH) {
+                console.warn('Maximum schema depth exceeded, stopping recursion');
+                return null;
+            }
+
+            // Create new visited set for this branch
+            const newVisited = new Set(visited);
+            newVisited.add(schemaId);
+
+            // Handle $ref with safe path resolution
             if (schema.$ref) {
                 const refPath = schema.$ref.replace('#/', '').split('/');
                 let ref = this.openAPISpec;
+
+                // Safely navigate the path, checking each segment
                 for (const part of refPath) {
+                    if (!ref || typeof ref !== 'object') {
+                        console.warn(`Invalid $ref path: ${schema.$ref} - segment "${part}" not found`);
+                        return null;
+                    }
+                    if (!(part in ref)) {
+                        console.warn(`Invalid $ref path: ${schema.$ref} - property "${part}" does not exist`);
+                        return null;
+                    }
                     ref = ref[part];
                 }
-                return this.generateJSONFromSchema(ref);
+
+                // Recursively resolve the reference
+                return this.generateJSONFromSchema(ref, newVisited, depth + 1);
             }
 
-            // Handle allOf, oneOf, anyOf (before type check)
+            // Handle allOf (before type check to ensure composition works)
             if (schema.allOf) {
                 const merged = {};
                 for (const subSchema of schema.allOf) {
-                    Object.assign(merged, this.generateJSONFromSchema(subSchema));
+                    const subResult = this.generateJSONFromSchema(subSchema, newVisited, depth + 1);
+                    if (subResult && typeof subResult === 'object') {
+                        Object.assign(merged, subResult);
+                    }
                 }
                 return merged;
             }
@@ -1925,20 +1960,30 @@
 
             // Handle arrays
             if (schema.type === 'array') {
-                const itemExample = this.generateJSONFromSchema(schema.items || {});
+                const itemExample = this.generateJSONFromSchema(schema.items || {}, newVisited, depth + 1);
                 return [itemExample];
             }
 
             // Handle objects
             if (schema.type === 'object' || schema.properties) {
                 const obj = {};
-                for (const [propName, propSchema] of Object.entries(schema.properties || {})) {
-                    obj[propName] = this.generateJSONFromSchema(propSchema);
+
+                // If schema.required exists, only include required properties
+                // Otherwise include all properties
+                const properties = schema.properties || {};
+                const required = schema.required || [];
+
+                for (const [propName, propSchema] of Object.entries(properties)) {
+                    // If there's a required array, only include required properties
+                    if (required.length > 0 && !required.includes(propName)) {
+                        continue;
+                    }
+                    obj[propName] = this.generateJSONFromSchema(propSchema, newVisited, depth + 1);
                 }
                 return obj;
             }
 
-            // Fallback
+            // Fallback for unknown types
             return null;
         }
 
@@ -1954,7 +1999,10 @@
             }
 
             const example = this.generateJSONFromSchema(jsonContent.schema);
-            return example ? JSON.stringify(example, null, 2) : '';
+            if (!example) {
+                return '';
+            }
+            return JSON.stringify(example, null, 2);
         }
     }
 
