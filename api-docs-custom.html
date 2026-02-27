@@ -1889,6 +1889,73 @@
                 responses: endpoint.responses || {}
             };
         }
+
+        generateJSONFromSchema(schema) {
+            if (!schema) return '';
+
+            // Handle $ref
+            if (schema.$ref) {
+                const refPath = schema.$ref.replace('#/', '').split('/');
+                let ref = this.openAPISpec;
+                for (const part of refPath) {
+                    ref = ref[part];
+                }
+                return this.generateJSONFromSchema(ref);
+            }
+
+            // Handle allOf, oneOf, anyOf (before type check)
+            if (schema.allOf) {
+                const merged = {};
+                for (const subSchema of schema.allOf) {
+                    Object.assign(merged, this.generateJSONFromSchema(subSchema));
+                }
+                return merged;
+            }
+
+            // Handle primitive types
+            if (schema.type === 'string') {
+                return schema.example || (schema.enum ? schema.enum[0] : 'string');
+            }
+            if (schema.type === 'number' || schema.type === 'integer') {
+                return schema.example || (schema.minimum || 0);
+            }
+            if (schema.type === 'boolean') {
+                return schema.example !== undefined ? schema.example : true;
+            }
+
+            // Handle arrays
+            if (schema.type === 'array') {
+                const itemExample = this.generateJSONFromSchema(schema.items || {});
+                return [itemExample];
+            }
+
+            // Handle objects
+            if (schema.type === 'object' || schema.properties) {
+                const obj = {};
+                for (const [propName, propSchema] of Object.entries(schema.properties || {})) {
+                    obj[propName] = this.generateJSONFromSchema(propSchema);
+                }
+                return obj;
+            }
+
+            // Fallback
+            return null;
+        }
+
+        generateExampleBody(requestBody) {
+            if (!requestBody || !requestBody.content) {
+                return '';
+            }
+
+            // Find JSON content type
+            const jsonContent = requestBody.content['application/json'];
+            if (!jsonContent || !jsonContent.schema) {
+                return '';
+            }
+
+            const example = this.generateJSONFromSchema(jsonContent.schema);
+            return example ? JSON.stringify(example, null, 2) : '';
+        }
     }
 
     // ============================================
