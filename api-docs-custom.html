@@ -590,6 +590,86 @@
             100% { background: transparent; }
         }
 
+        /* JWT Token Status */
+        .jwt-status {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .jwt-authenticated {
+            background: var(--accent-bg);
+            border-color: var(--accent-primary);
+        }
+
+        .jwt-unauthenticated {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .jwt-info {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .jwt-icon {
+            font-size: 18px;
+        }
+
+        .jwt-details {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .jwt-email {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .jwt-roles {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Authorization Header Row */
+        .auth-header-row {
+            padding: 8px 12px;
+            background: var(--accent-bg);
+            border-left: 3px solid var(--accent-primary);
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+
+        .auth-header-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .auth-header-info label {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .auth-token-preview {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: monospace;
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
         /* Utility classes */
         .mb-2 { margin-bottom: 8px; }
         .mb-4 { margin-bottom: 16px; }
@@ -645,6 +725,9 @@
                 </div>
 
                 <div class="panel-content">
+                    <!-- JWT Token Status -->
+                    <div id="jwt-status"></div>
+
                     <!-- Query Parameters -->
                     <div class="mb-4">
                         <div class="section-title" onclick="app.uiManager.toggleSection('query')">
@@ -1199,13 +1282,161 @@
     }
 
     /**
+     * JWTManager - JWT token storage and decoding
+     */
+    class JWTManager {
+        constructor(storage, eventBus) {
+            this.storage = storage;
+            this.eventBus = eventBus;
+            this.token = null;
+            this.decodedToken = null;
+            this.loadToken();
+            this.subscribeToEvents();
+        }
+
+        subscribeToEvents() {
+            // Listen for login responses to auto-capture token
+            this.eventBus.on('response:received', ({ data, url }) => {
+                if (url && url.includes('/auth/login')) {
+                    this.extractTokenFromResponse(data);
+                }
+            });
+        }
+
+        loadToken() {
+            const stored = this.storage.get('jwt:token');
+            if (stored) {
+                try {
+                    this.token = stored.token;
+                    this.decodedToken = stored.decoded;
+                    // Check if token is expired
+                    if (this.isTokenExpired()) {
+                        this.clearToken();
+                    }
+                } catch (e) {
+                    console.error('Failed to load stored token:', e);
+                    this.clearToken();
+                }
+            }
+        }
+
+        saveToken() {
+            this.storage.set('jwt:token', {
+                token: this.token,
+                decoded: this.decodedToken
+            });
+        }
+
+        extractTokenFromResponse(data) {
+            try {
+                // Handle different response formats
+                let token = null;
+
+                if (typeof data === 'string') {
+                    data = JSON.parse(data);
+                }
+
+                // Try common token field names
+                token = data.token || data.accessToken || data.access_token || data.jwt;
+
+                if (token) {
+                    this.setToken(token);
+                    return true;
+                }
+            } catch (e) {
+                console.error('Failed to extract token from response:', e);
+            }
+            return false;
+        }
+
+        setToken(token) {
+            this.token = token;
+            this.decodedToken = this.decodeJWT(token);
+            this.saveToken();
+            this.eventBus.emit('jwt:token:changed', {
+                token: this.token,
+                decoded: this.decodedToken
+            });
+        }
+
+        clearToken() {
+            this.token = null;
+            this.decodedToken = null;
+            this.storage.remove('jwt:token');
+            this.eventBus.emit('jwt:token:cleared');
+        }
+
+        decodeJWT(token) {
+            try {
+                // JWT format: header.payload.signature
+                const parts = token.split('.');
+                if (parts.length !== 3) {
+                    throw new Error('Invalid JWT format');
+                }
+
+                // Decode payload (base64url)
+                const payload = parts[1];
+                const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+                const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+                const decoded = atob(padded);
+                return JSON.parse(decoded);
+            } catch (e) {
+                console.error('Failed to decode JWT:', e);
+                return null;
+            }
+        }
+
+        isTokenExpired() {
+            if (!this.decodedToken || !this.decodedToken.exp) {
+                return false;
+            }
+            const now = Math.floor(Date.now() / 1000);
+            return this.decodedToken.exp < now;
+        }
+
+        getToken() {
+            return this.token;
+        }
+
+        getDecoded() {
+            return this.decodedToken;
+        }
+
+        isAuthenticated() {
+            return this.token !== null && !this.isTokenExpired();
+        }
+
+        getAuthorizationHeader() {
+            if (!this.isAuthenticated()) {
+                return null;
+            }
+            return `Bearer ${this.token}`;
+        }
+
+        // Get user-friendly token info for display
+        getTokenInfo() {
+            if (!this.decodedToken) {
+                return null;
+            }
+
+            return {
+                email: this.decodedToken.email || this.decodedToken.sub || 'Unknown',
+                roles: this.decodedToken.roles || this.decodedToken.authorities || [],
+                expiresAt: this.decodedToken.exp ? new Date(this.decodedToken.exp * 1000) : null
+            };
+        }
+    }
+
+    /**
      * RequestManager - HTTP request execution
      */
     class RequestManager {
-        constructor(stateManager, authManager, eventBus) {
+        constructor(stateManager, authManager, jwtManager, eventBus) {
             this.stateManager = stateManager;
             this.authManager = authManager;
+            this.jwtManager = jwtManager;
             this.eventBus = eventBus;
+            this.includeAuthHeader = true; // Default to including auth header when token exists
         }
 
         quickRequest(method, url) {
@@ -1254,6 +1485,10 @@
             this.stateManager.set('request.headers', headers);
         }
 
+        toggleAuthHeader(include) {
+            this.includeAuthHeader = include;
+        }
+
         buildQueryString(params) {
             const validParams = params.filter(p => p.key && p.value);
             if (validParams.length === 0) return '';
@@ -1270,10 +1505,23 @@
                     result[h.key] = h.value;
                 }
             });
-            const token = this.authManager.getCurrentToken();
-            if (token && !result['Authorization']) {
-                result['Authorization'] = `Bearer ${token}`;
+
+            // Add JWT Authorization header if toggle is enabled and token exists
+            if (this.includeAuthHeader && !result['Authorization']) {
+                const authHeader = this.jwtManager.getAuthorizationHeader();
+                if (authHeader) {
+                    result['Authorization'] = authHeader;
+                }
             }
+
+            // Fallback to old auth manager if no JWT
+            if (!result['Authorization']) {
+                const token = this.authManager.getCurrentToken();
+                if (token) {
+                    result['Authorization'] = `Bearer ${token}`;
+                }
+            }
+
             return result;
         }
 
@@ -1377,13 +1625,15 @@
      * UIManager - UI rendering and interaction
      */
     class UIManager {
-        constructor(stateManager, eventBus) {
+        constructor(stateManager, eventBus, jwtManager) {
             this.stateManager = stateManager;
             this.eventBus = eventBus;
+            this.jwtManager = jwtManager;
             this.loadFromStorage();
             this.setupEventListeners();
             this.setupKeyboardShortcuts();
             this.subscribeToEvents();
+            this.renderJWTStatus();
         }
 
         loadFromStorage() {
@@ -1531,6 +1781,57 @@
             this.eventBus.on('ui:notification', ({ message }) => {
                 this.showNotification(message);
             });
+
+            // JWT token events
+            this.eventBus.on('jwt:token:changed', () => {
+                this.renderJWTStatus();
+                this.renderHeaders();
+            });
+
+            this.eventBus.on('jwt:token:cleared', () => {
+                this.renderJWTStatus();
+                this.renderHeaders();
+            });
+        }
+
+        renderJWTStatus() {
+            const container = document.getElementById('jwt-status');
+            if (!container) return;
+
+            const isAuthenticated = this.jwtManager.isAuthenticated();
+            const tokenInfo = this.jwtManager.getTokenInfo();
+
+            if (isAuthenticated && tokenInfo) {
+                const roles = Array.isArray(tokenInfo.roles)
+                    ? tokenInfo.roles.join(', ')
+                    : tokenInfo.roles;
+
+                container.innerHTML = `
+                    <div class="jwt-status jwt-authenticated">
+                        <div class="jwt-info">
+                            <span class="jwt-icon">✅</span>
+                            <div class="jwt-details">
+                                <div class="jwt-email">Logged in as: <strong>${this.escapeHtml(tokenInfo.email)}</strong></div>
+                                <div class="jwt-roles">Roles: <strong>${this.escapeHtml(roles)}</strong></div>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-ghost" onclick="app.jwtManager.clearToken()">Clear Token</button>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <div class="jwt-status jwt-unauthenticated">
+                        <span class="jwt-icon">🔓</span>
+                        <span>Not authenticated</span>
+                    </div>
+                `;
+            }
+        }
+
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         toggleSection(sectionId) {
@@ -1583,7 +1884,30 @@
         renderHeaders() {
             const container = document.getElementById('headers');
             const headers = this.stateManager.get('request.headers');
-            container.innerHTML = headers.map((header, index) => `
+            const isAuthenticated = this.jwtManager.isAuthenticated();
+            const authHeader = this.jwtManager.getAuthorizationHeader();
+
+            let html = '';
+
+            // Add Authorization header with toggle if token exists
+            if (isAuthenticated && authHeader) {
+                const includeAuth = app.requestManager.includeAuthHeader;
+                html += `
+                    <div class="auth-header-row">
+                        <div class="auth-header-info">
+                            <input type="checkbox" id="include-auth-header" ${includeAuth ? 'checked' : ''}
+                                onchange="app.requestManager.toggleAuthHeader(this.checked)">
+                            <label for="include-auth-header">
+                                <strong>Authorization</strong>
+                                <span class="auth-token-preview">Bearer ${authHeader.substring(0, 20)}...</span>
+                            </label>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Render regular headers
+            html += headers.map((header, index) => `
                 <div class="kv-row">
                     <input type="text" class="kv-key" placeholder="Key" value="${header.key}"
                         onchange="app.requestManager.updateHeader(${index}, 'key', this.value)">
@@ -1592,6 +1916,8 @@
                     <button class="btn-icon kv-delete" onclick="app.requestManager.removeHeader(${index})">×</button>
                 </div>
             `).join('');
+
+            container.innerHTML = html;
         }
 
         renderResponse() {
@@ -2341,10 +2667,11 @@
             this.stateManager = new StateManager(this.eventBus);
 
             // Initialize managers
+            this.jwtManager = new JWTManager(this.storage, this.eventBus);
             this.authManager = new AuthManager(this.stateManager, this.storage, this.eventBus);
             this.historyManager = new HistoryManager(this.stateManager, this.storage, this.eventBus);
-            this.requestManager = new RequestManager(this.stateManager, this.authManager, this.eventBus);
-            this.uiManager = new UIManager(this.stateManager, this.eventBus);
+            this.requestManager = new RequestManager(this.stateManager, this.authManager, this.jwtManager, this.eventBus);
+            this.uiManager = new UIManager(this.stateManager, this.eventBus, this.jwtManager);
 
             // Initialize RedocIntegrator
             this.redocIntegrator = new RedocIntegrator(this.eventBus, this.stateManager, this.uiManager);
