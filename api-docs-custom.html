@@ -1782,7 +1782,43 @@
         }
 
         async init() {
-            // Implementation in next tasks
+            try {
+                // Fetch OpenAPI spec
+                await this.fetchOpenAPISpec();
+
+                // Get docs panel element
+                this.docsPanel = document.getElementById('redoc');
+
+                if (!this.docsPanel) {
+                    console.warn('Redoc panel not found');
+                    return;
+                }
+
+                // Attach DOM event interceptors
+                this.attachInterceptors();
+
+                // Inject "Try in Panel" buttons
+                this.injectTryButtons();
+
+                // Subscribe to events
+                this.subscribeToEvents();
+            } catch (error) {
+                console.error('RedocIntegrator initialization failed:', error);
+            }
+        }
+
+        async fetchOpenAPISpec() {
+            try {
+                const response = await fetch('/q/openapi');
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch OpenAPI spec: ${response.status}`);
+                }
+                this.openAPISpec = await response.json();
+                console.log('OpenAPI spec loaded:', Object.keys(this.openAPISpec));
+            } catch (error) {
+                console.error('Failed to fetch OpenAPI spec:', error);
+                this.openAPISpec = null;
+            }
         }
 
         attachInterceptors() {
@@ -1791,6 +1827,10 @@
 
         injectTryButtons() {
             // Implementation in next tasks
+        }
+
+        subscribeToEvents() {
+            // Implementation in later task
         }
 
         extractEndpointInfo(element) {
