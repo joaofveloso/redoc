@@ -1832,6 +1832,63 @@
         subscribeToEvents() {
             // Implementation in later task
         }
+
+        extractEndpointInfo(element) {
+            // Redoc uses data-section-id attribute like "section/Operation/get-/api/users"
+            const sectionId = element.getAttribute('data-section-id');
+            if (!sectionId) {
+                console.warn('No data-section-id found on element');
+                return null;
+            }
+
+            // Parse: "section/Operation/get-/api/users" → { method: "GET", path: "/api/users" }
+            const match = sectionId.match(/Operation\/([^-]+)-(.+)$/);
+            if (!match) {
+                console.warn('Could not parse section-id:', sectionId);
+                return null;
+            }
+
+            const method = match[1].toUpperCase();
+            const path = match[2];
+
+            // Look up endpoint details in OpenAPI spec
+            const endpointDetails = this.getEndpointDetailsFromSpec(method, path);
+
+            return {
+                method,
+                path,
+                sectionId,
+                ...endpointDetails
+            };
+        }
+
+        getEndpointDetailsFromSpec(method, path) {
+            if (!this.openAPISpec || !this.openAPISpec.paths) {
+                return {};
+            }
+
+            const pathObj = this.openAPISpec.paths[path];
+            if (!pathObj) {
+                console.warn(`Path not found in OpenAPI spec: ${path}`);
+                return {};
+            }
+
+            const methodLower = method.toLowerCase();
+            const endpoint = pathObj[methodLower];
+            if (!endpoint) {
+                console.warn(`Method ${method} not found for path: ${path}`);
+                return {};
+            }
+
+            // Extract summary, description, parameters, requestBody
+            return {
+                summary: endpoint.summary || '',
+                description: endpoint.description || '',
+                parameters: endpoint.parameters || [],
+                requestBody: endpoint.requestBody || null,
+                responses: endpoint.responses || {}
+            };
+        }
     }
 
     // ============================================
@@ -1850,6 +1907,9 @@
             this.historyManager = new HistoryManager(this.stateManager, this.storage, this.eventBus);
             this.requestManager = new RequestManager(this.stateManager, this.authManager, this.eventBus);
             this.uiManager = new UIManager(this.stateManager, this.eventBus);
+
+            // Initialize RedocIntegrator
+            this.redocIntegrator = new RedocIntegrator(this.eventBus, this.stateManager, this.uiManager);
 
             // Wire up request sending
             this.eventBus.on('request:send', () => this.requestManager.sendRequest());
@@ -1877,6 +1937,11 @@
                 },
                 document.getElementById('redoc')
             );
+
+            // Initialize RedocIntegrator after Redoc loads
+            setTimeout(() => {
+                this.redocIntegrator.init();
+            }, 1000);
         }
     }
 
