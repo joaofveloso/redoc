@@ -1894,7 +1894,7 @@
 
         async fetchOpenAPISpec() {
             try {
-                const response = await fetch('http://localhost:8080/q/openapi');
+                const response = await fetch('http://localhost:8080/openapi');
                 if (!response.ok) {
                     throw new Error(`Failed to fetch OpenAPI spec: ${response.status}`);
                 }
@@ -1920,14 +1920,14 @@
                 const endpointInfo = this.extractEndpointInfo(endpointElement);
                 if (!endpointInfo) return;
 
-                // Check if this is an Operation endpoint (not parameter, schema, etc.)
-                if (!endpointInfo.sectionId.includes('Operation/')) return;
+                // Check if this is an endpoint section (not tag, parameter, schema, etc.)
+                if (!endpointInfo.sectionId.includes('/paths/')) return;
 
                 // Emit event to populate request builder
                 this.eventBus.emit('redoc:endpoint:clicked', endpointInfo);
 
                 // Highlight the selected endpoint
-                this.highlightEndpoint(endpointInfo.method, endpointInfo.path);
+                this.highlightEndpoint(endpointInfo.method, endpointInfo.path, endpointInfo.sectionId);
             };
 
             // Use event delegation to intercept clicks on Redoc endpoints
@@ -1944,12 +1944,12 @@
 
             // Set up MutationObserver to watch for new endpoints (Redoc lazy-loads content)
             this.observer = new MutationObserver((mutations) => {
-                // Only rescan if mutations contain Operation endpoints (performance optimization)
+                // Only rescan if mutations contain endpoint sections (performance optimization)
                 const hasRelevantMutations = mutations.some((mutation) => {
                     return Array.from(mutation.addedNodes).some((node) => {
                         if (node.nodeType === Node.ELEMENT_NODE) {
-                            return node.querySelector && node.querySelector('[data-section-id*="Operation/"]') ||
-                                   (node.getAttribute && node.getAttribute('data-section-id')?.includes('Operation/'));
+                            return node.querySelector && node.querySelector('[data-section-id*="/paths/"]') ||
+                                   (node.getAttribute && node.getAttribute('data-section-id')?.includes('/paths/'));
                         }
                         return false;
                     });
@@ -1970,16 +1970,23 @@
         }
 
         scanAndInjectButtons() {
-            // Find all endpoint sections (Operation elements)
-            const endpoints = this.docsPanel.querySelectorAll('[data-section-id*="Operation/"]');
+            // Find all endpoint sections (Redoc uses data-section-id with "/paths/" pattern)
+            const endpoints = this.docsPanel.querySelectorAll('[data-section-id*="/paths/"]');
 
             endpoints.forEach((endpoint) => {
                 // Skip if already has button
                 if (endpoint.querySelector('.try-in-panel-btn')) return;
 
-                // Find the endpoint title/heading element
-                const titleEl = endpoint.querySelector('h1, h2, h3, h4, [class*="title"], [class*="heading"]');
-                if (!titleEl) return;
+                // Extract endpoint info to get method, path, and sectionId
+                const endpointInfo = this.extractEndpointInfo(endpoint);
+                if (!endpointInfo) return;
+
+                const { method, path, sectionId } = endpointInfo;
+
+                // Find the method button (e.g., "post /api/auth/login")
+                // Redoc renders this as a button with the method and path
+                const methodButton = endpoint.querySelector('button[class*="opblock-summary"]');
+                if (!methodButton) return;
 
                 // Create "Try in Panel" button
                 const button = document.createElement('button');
@@ -1989,18 +1996,12 @@
                     e.preventDefault();
                     e.stopPropagation();
 
-                    const endpointInfo = this.extractEndpointInfo(endpoint);
-                    if (endpointInfo) {
-                        this.eventBus.emit('redoc:endpoint:clicked', endpointInfo);
-                        // Call highlightEndpoint if it exists (implemented in Task 6)
-                        if (this.highlightEndpoint) {
-                            this.highlightEndpoint(endpointInfo.method, endpointInfo.path);
-                        }
-                    }
+                    this.eventBus.emit('redoc:endpoint:clicked', endpointInfo);
+                    this.highlightEndpoint(method, path, sectionId);
                 };
 
-                // Append button after title
-                titleEl.appendChild(button);
+                // Append button after method button
+                methodButton.parentElement.appendChild(button);
             });
         }
 
@@ -2012,22 +2013,44 @@
         }
 
         extractEndpointInfo(element) {
-            // Redoc uses data-section-id attribute like "section/Operation/get-/api/users"
+            // Redoc uses data-section-id attribute like "tag/Authentication/paths/~1api~1auth~1login/post"
             const sectionId = element.getAttribute('data-section-id');
             if (!sectionId) {
                 console.warn('No data-section-id found on element');
                 return null;
             }
 
-            // Parse: "section/Operation/get-/api/users" → { method: "GET", path: "/api/users" }
-            const match = sectionId.match(/Operation\/([^-]+)-(.+)$/);
+            // Parse: "tag/.../paths/~1api~1auth~1login/post"
+            // ~1 is URL encoding for /, so ~1api~1auth~1login → /api/auth/login
+            let match = sectionId.match(/\/paths\/(.+)\/(\w+)$/);
             if (!match) {
-                console.warn('Could not parse section-id:', sectionId);
-                return null;
+                // Try alternate format: "Operation/get-/api/users"
+                match = sectionId.match(/Operation\/([^-]+)-(.+)$/);
+                if (!match) {
+                    console.warn('Could not parse section-id:', sectionId);
+                    return null;
+                }
+                // Alternate format: method is first group, path is second
+                const method = match[1].toUpperCase();
+                const path = match[2];
+                const endpointDetails = this.getEndpointDetailsFromSpec(method, path);
+                return { method, path, sectionId, ...endpointDetails };
             }
 
-            const method = match[1].toUpperCase();
-            const path = match[2];
+            // Redoc format: path with URL encoding (~1 = /) is first, method is second
+            const encodedPath = match[1];
+            const method = match[2].toUpperCase();
+
+            // Decode URL encoding: ~1 → /
+            // Note: encodedPath may start with ~1 (representing the leading /)
+            let path = encodedPath.replace(/~1/g, '/');
+
+            // If path doesn't start with /, add it
+            if (!path.startsWith('/')) {
+                path = '/' + path;
+            }
+
+            console.log('Extracted endpoint:', { method, path, encodedPath, sectionId });
 
             // Look up endpoint details in OpenAPI spec
             const endpointDetails = this.getEndpointDetailsFromSpec(method, path);
@@ -2230,7 +2253,7 @@
             });
         }
 
-        highlightEndpoint(method, path) {
+        highlightEndpoint(method, path, sectionId = null) {
             // Clear existing timeout to prevent orphaned callbacks
             if (this.highlightTimeout) {
                 clearTimeout(this.highlightTimeout);
@@ -2241,9 +2264,32 @@
                 el.classList.remove('endpoint-active');
             });
 
-            // Find the endpoint element by data-section-id
-            const sectionId = `section/Operation/${method.toLowerCase()}-${path}`;
-            const endpointEl = this.docsPanel.querySelector(`[data-section-id="${sectionId}"]`);
+            // If sectionId is provided, use it directly
+            if (sectionId) {
+                const endpointEl = this.docsPanel.querySelector(`[data-section-id="${sectionId}"]`);
+                if (endpointEl) {
+                    // Add highlight class
+                    endpointEl.classList.add('endpoint-active');
+
+                    // Scroll into view if not visible
+                    endpointEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+                    // Remove highlight after 2 seconds
+                    this.highlightTimeout = setTimeout(() => {
+                        endpointEl.classList.remove('endpoint-active');
+                        this.highlightTimeout = null;
+                    }, 2000);
+                }
+                return;
+            }
+
+            // Otherwise, try to find by constructing the section ID
+            // Encode the path (replace / with ~1)
+            const encodedPath = path.substring(1).replace(/\//g, '~1');
+
+            // Try to find any element with matching method at the end
+            const possibleId = `/paths/${encodedPath}/${method.toLowerCase()}`;
+            const endpointEl = this.docsPanel.querySelector(`[data-section-id$="${possibleId}"]`);
 
             if (endpointEl) {
                 // Add highlight class
@@ -2252,7 +2298,7 @@
                 // Scroll into view if not visible
                 endpointEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-                // Remove highlight after 2 seconds (optional)
+                // Remove highlight after 2 seconds
                 this.highlightTimeout = setTimeout(() => {
                     endpointEl.classList.remove('endpoint-active');
                     this.highlightTimeout = null;
@@ -2323,7 +2369,7 @@
 
         initRedoc() {
             Redoc.init(
-                "http://localhost:8080/q/openapi",
+                "http://localhost:8080/openapi",
                 {
                     scrollYOffset: 0
                 },
