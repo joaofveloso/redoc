@@ -1804,6 +1804,7 @@
             this.openAPISpec = null;
             this.docsPanel = null;
             this.tryButtonsInjected = false;
+            this.observer = null;
         }
 
         async init() {
@@ -1857,15 +1858,24 @@
             this.scanAndInjectButtons();
 
             // Set up MutationObserver to watch for new endpoints (Redoc lazy-loads content)
-            const observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
-                    if (mutation.addedNodes.length > 0) {
-                        this.scanAndInjectButtons();
-                    }
+            this.observer = new MutationObserver((mutations) => {
+                // Only rescan if mutations contain Operation endpoints (performance optimization)
+                const hasRelevantMutations = mutations.some((mutation) => {
+                    return Array.from(mutation.addedNodes).some((node) => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            return node.querySelector && node.querySelector('[data-section-id*="Operation/"]') ||
+                                   (node.getAttribute && node.getAttribute('data-section-id')?.includes('Operation/'));
+                        }
+                        return false;
+                    });
                 });
+
+                if (hasRelevantMutations) {
+                    this.scanAndInjectButtons();
+                }
             });
 
-            observer.observe(this.docsPanel, {
+            this.observer.observe(this.docsPanel, {
                 childList: true,
                 subtree: true
             });
@@ -1897,7 +1907,10 @@
                     const endpointInfo = this.extractEndpointInfo(endpoint);
                     if (endpointInfo) {
                         this.eventBus.emit('redoc:endpoint:clicked', endpointInfo);
-                        this.highlightEndpoint(endpointInfo.method, endpointInfo.path);
+                        // Call highlightEndpoint if it exists (implemented in Task 6)
+                        if (this.highlightEndpoint) {
+                            this.highlightEndpoint(endpointInfo.method, endpointInfo.path);
+                        }
                     }
                 };
 
@@ -2080,6 +2093,15 @@
                 return '';
             }
             return JSON.stringify(example, null, 2);
+        }
+
+        destroy() {
+            // Disconnect MutationObserver to prevent memory leaks
+            if (this.observer) {
+                this.observer.disconnect();
+                this.observer = null;
+                console.log('RedocIntegrator destroyed, observer disconnected');
+            }
         }
     }
 
