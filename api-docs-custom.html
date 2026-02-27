@@ -548,6 +548,31 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
+        /* Try in Panel Button */
+        .try-in-panel-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 12px;
+            margin-left: 8px;
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .try-in-panel-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .try-in-panel-btn:active {
+            transform: scale(0.98);
+        }
+
         /* Utility classes */
         .mb-2 { margin-bottom: 8px; }
         .mb-4 { margin-bottom: 16px; }
@@ -1826,7 +1851,59 @@
         }
 
         injectTryButtons() {
-            // Implementation in next tasks
+            if (!this.docsPanel || this.tryButtonsInjected) return;
+
+            // Initial scan for existing endpoints
+            this.scanAndInjectButtons();
+
+            // Set up MutationObserver to watch for new endpoints (Redoc lazy-loads content)
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.addedNodes.length > 0) {
+                        this.scanAndInjectButtons();
+                    }
+                });
+            });
+
+            observer.observe(this.docsPanel, {
+                childList: true,
+                subtree: true
+            });
+
+            this.tryButtonsInjected = true;
+            console.log('Try in Panel button injection initialized');
+        }
+
+        scanAndInjectButtons() {
+            // Find all endpoint sections (Operation elements)
+            const endpoints = this.docsPanel.querySelectorAll('[data-section-id*="Operation/"]');
+
+            endpoints.forEach((endpoint) => {
+                // Skip if already has button
+                if (endpoint.querySelector('.try-in-panel-btn')) return;
+
+                // Find the endpoint title/heading element
+                const titleEl = endpoint.querySelector('h1, h2, h3, h4, [class*="title"], [class*="heading"]');
+                if (!titleEl) return;
+
+                // Create "Try in Panel" button
+                const button = document.createElement('button');
+                button.className = 'try-in-panel-btn';
+                button.innerHTML = '🚀 Try in Panel';
+                button.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const endpointInfo = this.extractEndpointInfo(endpoint);
+                    if (endpointInfo) {
+                        this.eventBus.emit('redoc:endpoint:clicked', endpointInfo);
+                        this.highlightEndpoint(endpointInfo.method, endpointInfo.path);
+                    }
+                };
+
+                // Append button after title
+                titleEl.appendChild(button);
+            });
         }
 
         subscribeToEvents() {
