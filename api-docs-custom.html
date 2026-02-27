@@ -766,6 +766,16 @@
                 <h3>Auth Profiles</h3>
                 <p>Configure authentication profiles in the settings. Each profile can have its own base URL and access token. The token will be automatically included in all requests.</p>
             </div>
+            <div class="help-section">
+                <h3>🔗 Redoc Integration</h3>
+                <ul>
+                    <li><strong>Click endpoint in docs:</strong> Click any endpoint in Redoc (left panel) to auto-populate the request builder</li>
+                    <li><strong>🚀 Try in Panel button:</strong> Quick-load buttons appear next to each endpoint for fast access</li>
+                    <li><strong>Visual feedback:</strong> Selected endpoint highlights with colored background for 2 seconds</li>
+                    <li><strong>Example bodies:</strong> Request body examples are auto-generated from OpenAPI schemas</li>
+                    <li><strong>Query parameters:</strong> Parameters from the OpenAPI spec are automatically filled in</li>
+                </ul>
+            </div>
         </div>
     </div>
 
@@ -1810,10 +1820,40 @@
     // REDOC INTEGRATION
     // ============================================
 
-    /**
-     * RedocIntegrator - Deep integration with Redoc documentation panel
-     */
     class RedocIntegrator {
+        /**
+         * RedocIntegrator - Deep integration with Redoc documentation panel
+         *
+         * Features:
+         * - Click endpoints in Redoc to auto-populate request builder
+         * - "Try in Panel" buttons on each endpoint
+         * - Example JSON generation from OpenAPI schemas
+         * - Visual highlighting of selected endpoint
+         * - Query parameter population from spec
+         * - DOM event interception via event delegation
+         * - MutationObserver for lazy-loaded content
+         *
+         * Usage:
+         * - Automatically initialized by APIConsole
+         * - Click any endpoint in left panel to load into request builder
+         * - Click "🚀 Try in Panel" button for quick access
+         *
+         * Events emitted:
+         * - 'redoc:endpoint:clicked' - When user clicks an endpoint
+         *
+         * Methods:
+         * - init() - Initialize the integrator (fetch spec, attach interceptors, inject buttons)
+         * - fetchOpenAPISpec() - Fetch OpenAPI specification from backend
+         * - extractEndpointInfo(element) - Parse endpoint from DOM element
+         * - generateJSONFromSchema(schema) - Generate example from schema
+         * - highlightEndpoint(method, path) - Visually highlight selected endpoint
+         * - destroy() - Clean up resources (disconnect observers, remove listeners)
+         *
+         * Requirements:
+         * - Redoc must be initialized before RedocIntegrator.init()
+         * - OpenAPI spec must be available at http://localhost:8080/q/openapi
+         * - Browser must support MutationObserver
+         */
         constructor(eventBus, stateManager, uiManager) {
             this.eventBus = eventBus;
             this.stateManager = stateManager;
